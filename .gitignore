@@ -1,0 +1,15 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+dist/
+installer_output/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+packages/

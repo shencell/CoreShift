@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <RootNamespace>CoreShift</RootNamespace>
+    <AssemblyName>CoreShift</AssemblyName>
+    <ApplicationIcon>Assets\CoreShift.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <Company>CoreShift</Company>
+    <Product>CoreShift</Product>
+    <Authors>CoreShift</Authors>
+    <Description>Zero-overhead Windows power-mode toggle (Turbo Boost on/off) that lives in the system tray.</Description>
+    <Copyright>Copyright (c) 2026</Copyright>
+
+    <!-- Keep the published binary small; single-file is produced by build/publish.ps1 -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ErrorReport>none</ErrorReport>
+
+    <!-- Low-footprint runtime tuning for a mostly-idle tray app -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredCompilation>true</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Maintained, .NET 8-compatible successor of Hardcodet.NotifyIcon.Wpf (same TaskbarIcon API/lineage).
+         Pinned to 2.3.2: the latest stable build with a native net8.0-windows target. -->
+    <PackageReference Include="H.NotifyIcon.Wpf" Version="2.3.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\CoreShift.ico" />
+  </ItemGroup>
+
+</Project>
