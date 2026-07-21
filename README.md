@@ -1,12 +1,12 @@
 # CoreShift
 
-**v1.1.0** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
+**v1.2.0** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
 and a **full-performance** profile in one click — controlling both the **CPU** and the **NVIDIA
 GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
 
 - **CPU** — toggles *Maximum processor state* between **100% (Coding Mode — Turbo Boost ON)** and
   **99% (Gaming Mode — Turbo Boost OFF)**.
-- **GPU** — **BASE / LIGHT / HEAVY** power presets for the NVIDIA dGPU via NVML.
+- **GPU** — **BASE / LIGHT / FIRM / HEAVY** power presets for the NVIDIA dGPU via NVML.
 
 > Setting the maximum processor state to **99%** is the well-known trick that disables
 > Intel/AMD Turbo Boost — lower temperatures, less fan noise, steadier clocks. **100%**
@@ -27,7 +27,7 @@ GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
 - **Auto-start.** Self-registers under `HKCU\…\Run` on first launch; toggle it any time from
   the tray menu.
 - **Small.** Framework-dependent single-file build, well under 5 MB.
-- **GPU power presets** *(v1.1)*. BASE / LIGHT / HEAVY pills cap the NVIDIA dGPU via NVML, with an
+- **GPU power presets.** BASE / LIGHT / FIRM / HEAVY pills cap the NVIDIA dGPU via NVML, with an
   automatic locked-clock fallback for laptop vBIOSes that refuse power limits — and **no UAC prompt
   after the first setup**. Coexists with Armoury Crate. [Details ↓](#gpu-presets)
 
@@ -68,6 +68,7 @@ One executable, three roles — `CoreShift.exe` (tray), `--gpu-apply` (elevated 
 |---|---|
 | **BASE** | Removes CoreShift's cap — power limit back to vBIOS max, clocks unlocked. Armoury Crate governs. |
 | **LIGHT** | ~40–60 W envelope. Default 50 W, or 990 MHz locked-clock fallback. |
+| **FIRM** | ~50–70 W envelope. Default 60 W, or 1200 MHz locked-clock fallback. |
 | **HEAVY** | ~60–80 W envelope. Default 70 W, or 1402 MHz locked-clock fallback. |
 
 The software power limit is tried first; laptop vBIOSes that reject it
@@ -75,8 +76,15 @@ The software power limit is tried first; laptop vBIOSes that reject it
 API). Tune the values in `%LOCALAPPDATA%\CoreShift\gpu-config.json`:
 
 ```json
-{ "LightWatts": 50, "HeavyWatts": 70, "LightMaxMhz": 990, "HeavyMaxMhz": 1402 }
+{
+  "LightWatts": 50, "FirmWatts": 60, "HeavyWatts": 70,
+  "LightMaxMhz": 990, "FirmMaxMhz": 1200, "HeavyMaxMhz": 1402
+}
 ```
+
+Any field you delete or set to zero is healed back to its default on next use (which is also how
+a pre-FIRM config is upgraded in place), and every value is re-clamped to its band on each apply,
+so a hand-edit can't push the GPU outside the supported range.
 
 **Elevation:** NVML *reads* need no rights, so live data always shows. *Writes* do — so the first
 preset you apply registers a scheduled task (**one UAC prompt, once ever**); after that, switching

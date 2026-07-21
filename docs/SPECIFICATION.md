@@ -3,18 +3,19 @@
 | | |
 |---|---|
 | **Product** | CoreShift |
-| **Version** | 1.1.0 |
+| **Version** | 1.2.0 |
 | **Platform** | Windows 10 (1809+) / Windows 11, x64 |
 | **Runtime** | .NET 8 Desktop Runtime (framework-dependent) |
 | **UI stack** | WPF (Windows Presentation Foundation) |
-| **Distribution** | Inno Setup 6 installer, `CoreShift-Setup-1.1.0.exe` |
+| **Distribution** | Inno Setup 6 installer, `CoreShift-Setup-1.2.0.exe` |
 
 CoreShift is a system-tray utility that shifts a laptop between a **quiet/cool** profile and a
 **full-performance** profile in one click, by controlling two independent knobs:
 
 1. **CPU** — the Windows *Maximum processor state* (`PROCTHROTTLEMAX`), toggled 100% ↔ 99%.
    99% is the well-known trick that disables Intel/AMD Turbo Boost.
-2. **GPU** — the NVIDIA discrete GPU power envelope, via NVML presets **BASE / LIGHT / HEAVY**.
+2. **GPU** — the NVIDIA discrete GPU power envelope, via NVML presets
+   **BASE / LIGHT / FIRM / HEAVY**.
 
 ---
 
@@ -143,8 +144,12 @@ renders as Gaming Mode. Toggling always targets exactly 99 or 100.
 |---|---|---|---|
 | `Base` | Remove CoreShift's cap; vendor software governs | vBIOS maximum | reset (unlocked) |
 | `Light` | Light sessions (browsing, video, IDE) | **50 W** (clamp 40–60) | 210 – **990 MHz** (clamp 400–1300) |
+| `Firm` | Mixed sessions — between Light and Heavy | **60 W** (clamp 50–70) | 210 – **1200 MHz** (clamp 800–1600) |
 | `Heavy` | Heavy sessions (gaming, render) | **70 W** (clamp 60–80) | 210 – **1402 MHz** (clamp 1000–2000) |
 | `Custom` | Sentinel — no preset applied this boot | — | — |
+
+The bands deliberately overlap, so a user who tunes `LightWatts` up and `HeavyWatts` down still
+gets a monotonic BASE → LIGHT → FIRM → HEAVY progression.
 
 #### 4.2.2 Knob-selection chain
 
@@ -153,7 +158,7 @@ reject it with `NVML_ERROR_NOT_SUPPORTED (3)`, so CoreShift falls back to **lock
 (the `nvidia-smi -lgc` API), which reaches a comparable thermal envelope.
 
 ```
-LIGHT / HEAVY:
+LIGHT / FIRM / HEAVY:
   1. nvmlDeviceGetPowerManagementLimitConstraints  → clamp target watts into [min,max]
   2. nvmlDeviceSetPowerManagementLimit             → success? also ResetLockedClocks, method="power"
   3. otherwise nvmlDeviceSetGpuLockedClocks(210, maxMhz) → success? method="clock"
@@ -297,8 +302,8 @@ Measured on Windows 11 (see §9).
 
 | File | Written by | Schema | Purpose |
 |---|---|---|---|
-| `gpu-config.json` | Helper (seeded on first use) | `{ LightWatts, HeavyWatts, LightMaxMhz, HeavyMaxMhz }` | **User-tunable** preset values |
-| `gpu-target.json` | Tray app | `{ Mode: "base"\|"light"\|"heavy", Nonce }` | Requested preset |
+| `gpu-config.json` | Helper (seeded on first use) | `{ LightWatts, FirmWatts, HeavyWatts, LightMaxMhz, FirmMaxMhz, HeavyMaxMhz }` | **User-tunable** preset values |
+| `gpu-target.json` | Tray app | `{ Mode: "base"\|"light"\|"firm"\|"heavy", Nonce }` | Requested preset |
 | `gpu-result.json` | Helper | `{ Echo, Result, AppliedMode, AppliedBoot }` | Outcome + applied-state memory |
 
 `Result` is `"ok (power)"`, `"ok (clock)"`, or the NVML error text. Unreadable/corrupt files are
@@ -307,11 +312,20 @@ treated as absent.
 Defaults seeded into `gpu-config.json`:
 
 ```json
-{ "LightWatts": 50, "HeavyWatts": 70, "LightMaxMhz": 990, "HeavyMaxMhz": 1402 }
+{
+  "LightWatts": 50, "FirmWatts": 60, "HeavyWatts": 70,
+  "LightMaxMhz": 990, "FirmMaxMhz": 1200, "HeavyMaxMhz": 1402
+}
 ```
 
-Values are re-clamped by the helper on every apply, so hand-edits cannot push the GPU outside the
-supported band.
+**Self-healing.** `LoadConfig` replaces any field that is missing or non-positive with its default
+and rewrites the file. This is the in-place upgrade path for a pre-1.2 config: `FirmWatts` /
+`FirmMaxMhz` are absent, so `System.Text.Json` binds them as `0` (it does **not** throw on missing
+constructor parameters), which would otherwise clamp FIRM to the bottom of its band (50 W / 800 MHz)
+instead of its intended 60 W / 1200 MHz. User-customised values are preserved untouched.
+
+Values are additionally re-clamped by the helper on every apply, so hand-edits cannot push the GPU
+outside the supported band.
 
 ### 5.2 Registry
 
@@ -338,7 +352,7 @@ supported band.
 
 | Property | Value |
 |---|---|
-| Size | `276 × 392` DIP |
+| Size | `308 × 392` DIP (widened from 276 in v1.2 to fit a fourth GPU pill) |
 | Style | `WindowStyle=None`, `AllowsTransparency=True`, `Background=Transparent` |
 | Behaviour | `ShowInTaskbar=False`, `ResizeMode=NoResize`, `Topmost=True` |
 | Alt+Tab | Hidden via `WS_EX_TOOLWINDOW` applied in `OnSourceInitialized` |
@@ -362,7 +376,9 @@ supported band.
 
 1. **Wordmark** — `CORE` (primary) + `SHIFT` (accent), 13 px SemiBold.
 2. **Toggle tile** — 60 × 60 vector icon, `ModeTitle` 17 px SemiBold, `ModeSubtitle` 11.5 px.
-3. **GPU block** — `GpuStatusLine` 11.5 px, then a `UniformGrid` of 3 pills: `BASE` `LIGHT` `HEAVY`.
+3. **GPU block** — `GpuStatusLine` 11.5 px, then a `UniformGrid` of 4 pills:
+   `BASE` `LIGHT` `FIRM` `HEAVY`. Usable pill width is
+   `(WindowWidth − 70 + 6) / 4 − 6` = **55 px** at 308 DIP, comfortable for "HEAVY" at 11 px SemiBold.
 4. **Status line** — error text, 10.5 px, error colour; empty in the happy path.
 
 ### 6.4 Interaction & motion
@@ -388,7 +404,7 @@ Two `Viewbox` elements share a cell; `DataTrigger` on `IsCodingMode` shows exact
 |---|---|
 | NVML unavailable | `GPU · <actual NVML error>` |
 | State not yet read | `GPU · …` |
-| `Light` / `Heavy` | `GPU · <clock> MHz · capped` |
+| `Light` / `Firm` / `Heavy` | `GPU · <clock> MHz · capped` |
 | `Base` | `GPU · <clock> MHz · Armoury Crate governs` |
 | `Custom` | `GPU · <clock> MHz · no preset this boot` |
 
@@ -409,7 +425,7 @@ The real NVML error is shown deliberately — a bare "unavailable" would be unde
 | `StatusMessage` | `string` | Error surface |
 | `GpuState` | `GpuState?` | `CurrentLimitWatts, MinWatts, MaxWatts, GraphicsClockMhz` |
 | `CurrentGpuMode` | `GpuMode` | From `gpu-result.json` + boot stamp |
-| `IsGpuBase/Light/Heavy` | `bool` | Drive pill `Tag="Active"` |
+| `IsGpuBase/Light/Firm/Heavy` | `bool` | Drive pill `Tag="Active"` |
 | `GpuStatusLine` | `string` | See §6.6 |
 | `RefreshAsync()` | `Task` | CPU + GPU read |
 | `ToggleAsync()` | `Task` | CPU 100 ↔ 99 |
@@ -462,7 +478,7 @@ Measured on Windows 11, .NET 8.0.28:
 | Dependency | `H.NotifyIcon.Wpf` **2.3.2** — pinned: the newest stable with a native `net8.0-windows` target (2.4.x targets net10 and would silently fall back to .NET Framework assets) |
 
 ```powershell
-build\build-installer.ps1     # icon → single-file exe → installer_output\CoreShift-Setup-1.1.0.exe
+build\build-installer.ps1     # icon → single-file exe → installer_output\CoreShift-Setup-1.2.0.exe
 ```
 
 **Version bump checklist:** `<Version>/<FileVersion>/<AssemblyVersion>` in `CoreShift.csproj`
@@ -497,6 +513,13 @@ build\build-installer.ps1     # icon → single-file exe → installer_output\Co
 ---
 
 ## 12. Version history
+
+### 1.2.0
+- **Added** a fourth GPU preset **FIRM** (~50–70 W; default 60 W, 1200 MHz locked-clock fallback)
+  sitting between LIGHT and HEAVY.
+- **Added** self-healing `gpu-config.json`: missing/invalid fields are restored to defaults and the
+  file is rewritten, which upgrades a pre-1.2 config in place without losing customised values.
+- **Changed** widget width 276 → 308 DIP to fit the fourth pill.
 
 ### 1.1.0
 - **Added** GPU power presets (BASE / LIGHT / HEAVY) via NVML, with power-limit → locked-clock

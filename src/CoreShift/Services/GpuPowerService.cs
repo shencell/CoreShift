@@ -16,6 +16,8 @@ public enum GpuMode
     Base,
     /// <summary>Aggressive cap for light sessions (~40–60 W effective).</summary>
     Light,
+    /// <summary>Middle cap between LIGHT and HEAVY (~50–70 W effective).</summary>
+    Firm,
     /// <summary>Moderate cap for heavy sessions (~60–80 W effective).</summary>
     Heavy,
     /// <summary>No preset applied this boot (or applied state unknown).</summary>
@@ -54,16 +56,20 @@ public sealed class GpuPowerService
     private static string TargetPath => Path.Combine(StateDir, "gpu-target.json");
     private static string ResultPath => Path.Combine(StateDir, "gpu-result.json");
 
-    private sealed record GpuConfig(int LightWatts, int HeavyWatts, int LightMaxMhz, int HeavyMaxMhz);
+    private sealed record GpuConfig(
+        int LightWatts, int FirmWatts, int HeavyWatts,
+        int LightMaxMhz, int FirmMaxMhz, int HeavyMaxMhz);
     private sealed record GpuTarget(string Mode, string Nonce);
     private sealed record GpuOutcome(string Echo, string Result, string AppliedMode, string AppliedBoot);
 
-    // LIGHT targets ~40–60 W, HEAVY ~60–80 W. Watts are tried first (power limit); the MHz
-    // values are the locked-clock fallback tuned to land in the same thermal envelope on a
-    // 100–140 W-class mobile GPU. All four are seeded into HKCU for easy tuning.
+    // LIGHT targets ~40–60 W, FIRM ~50–70 W, HEAVY ~60–80 W. Watts are tried first (power
+    // limit); the MHz values are the locked-clock fallback tuned to land in the same thermal
+    // envelope on a 100–140 W-class mobile GPU. All six are seeded into gpu-config.json.
     private const int DefaultLightWatts = 50;
+    private const int DefaultFirmWatts = 60;
     private const int DefaultHeavyWatts = 70;
     private const int DefaultLightMaxMhz = 990;
+    private const int DefaultFirmMaxMhz = 1200;
     private const int DefaultHeavyMaxMhz = 1402;
     private const uint LockedClockFloorMhz = 210;
 
@@ -78,6 +84,7 @@ public sealed class GpuPowerService
         {
             "base" => GpuMode.Base,
             "light" => GpuMode.Light,
+            "firm" => GpuMode.Firm,
             "heavy" => GpuMode.Heavy,
             _ => GpuMode.Custom
         };
@@ -140,6 +147,7 @@ public sealed class GpuPowerService
         GpuMode mode = target.Mode switch
         {
             "light" => GpuMode.Light,
+            "firm" => GpuMode.Firm,
             "heavy" => GpuMode.Heavy,
             _ => GpuMode.Base
         };
@@ -147,8 +155,10 @@ public sealed class GpuPowerService
 
         GpuConfig cfg = LoadConfig();
         int lightWatts = Math.Clamp(cfg.LightWatts, 40, 60);
+        int firmWatts = Math.Clamp(cfg.FirmWatts, 50, 70);
         int heavyWatts = Math.Clamp(cfg.HeavyWatts, 60, 80);
         int lightMhz = Math.Clamp(cfg.LightMaxMhz, 400, 1300);
+        int firmMhz = Math.Clamp(cfg.FirmMaxMhz, 800, 1600);
         int heavyMhz = Math.Clamp(cfg.HeavyMaxMhz, 1000, 2000);
 
         string error;
@@ -169,8 +179,18 @@ public sealed class GpuPowerService
                     return (null, rcClock == 0 || rcPower == 0 ? string.Empty : Nvml.Describe(rcClock));
                 }
 
-                int watts = mode == GpuMode.Light ? lightWatts : heavyWatts;
-                uint maxMhz = (uint)(mode == GpuMode.Light ? lightMhz : heavyMhz);
+                int watts = mode switch
+                {
+                    GpuMode.Light => lightWatts,
+                    GpuMode.Firm => firmWatts,
+                    _ => heavyWatts
+                };
+                uint maxMhz = (uint)(mode switch
+                {
+                    GpuMode.Light => lightMhz,
+                    GpuMode.Firm => firmMhz,
+                    _ => heavyMhz
+                });
 
                 // Preferred knob: software power limit.
                 if (Nvml.GetConstraints(dev, out uint minMwC, out uint maxMwC) == 0)
@@ -228,6 +248,7 @@ public sealed class GpuPowerService
     private static string ModeName(GpuMode mode) => mode switch
     {
         GpuMode.Light => "light",
+        GpuMode.Firm => "firm",
         GpuMode.Heavy => "heavy",
         _ => "base"
     };
@@ -284,15 +305,37 @@ public sealed class GpuPowerService
         return PowerResult.Fail("GPU helper did not respond (task blocked?).");
     }
 
-    /// <summary>Loads the tuning config, seeding the file with defaults on first use.</summary>
+    /// <summary>
+    /// Loads the tuning config, seeding the file with defaults on first use. Any field that is
+    /// missing or non-positive is healed back to its default and the file is rewritten — this is
+    /// what upgrades a pre-FIRM config (which has no FirmWatts/FirmMaxMhz, so they would
+    /// deserialize as 0 and clamp to the bottom of the band) and repairs bad hand-edits.
+    /// </summary>
     private static GpuConfig LoadConfig()
     {
-        GpuConfig? cfg = ReadJson<GpuConfig>(ConfigPath);
-        if (cfg is not null) return cfg;
+        var defaults = new GpuConfig(
+            DefaultLightWatts, DefaultFirmWatts, DefaultHeavyWatts,
+            DefaultLightMaxMhz, DefaultFirmMaxMhz, DefaultHeavyMaxMhz);
 
-        cfg = new GpuConfig(DefaultLightWatts, DefaultHeavyWatts, DefaultLightMaxMhz, DefaultHeavyMaxMhz);
-        WriteJson(ConfigPath, cfg);
-        return cfg;
+        GpuConfig? cfg = ReadJson<GpuConfig>(ConfigPath);
+        if (cfg is null)
+        {
+            WriteJson(ConfigPath, defaults);
+            return defaults;
+        }
+
+        GpuConfig healed = cfg with
+        {
+            LightWatts = cfg.LightWatts > 0 ? cfg.LightWatts : defaults.LightWatts,
+            FirmWatts = cfg.FirmWatts > 0 ? cfg.FirmWatts : defaults.FirmWatts,
+            HeavyWatts = cfg.HeavyWatts > 0 ? cfg.HeavyWatts : defaults.HeavyWatts,
+            LightMaxMhz = cfg.LightMaxMhz > 0 ? cfg.LightMaxMhz : defaults.LightMaxMhz,
+            FirmMaxMhz = cfg.FirmMaxMhz > 0 ? cfg.FirmMaxMhz : defaults.FirmMaxMhz,
+            HeavyMaxMhz = cfg.HeavyMaxMhz > 0 ? cfg.HeavyMaxMhz : defaults.HeavyMaxMhz
+        };
+
+        if (healed != cfg) WriteJson(ConfigPath, healed);   // records give value equality
+        return healed;
     }
 
     private static T? ReadJson<T>(string path) where T : class

@@ -58,6 +58,11 @@ public partial class MainWindow : Window
         await _viewModel.SetGpuModeAsync(GpuMode.Light);
     }
 
+    private async void GpuFirm_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.SetGpuModeAsync(GpuMode.Firm);
+    }
+
     private async void GpuHeavy_Click(object sender, RoutedEventArgs e)
     {
         await _viewModel.SetGpuModeAsync(GpuMode.Heavy);

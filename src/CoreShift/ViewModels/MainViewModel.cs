@@ -72,6 +72,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             OnPropertyChanged();
             OnPropertyChanged(nameof(IsGpuBase));
             OnPropertyChanged(nameof(IsGpuLight));
+            OnPropertyChanged(nameof(IsGpuFirm));
             OnPropertyChanged(nameof(IsGpuHeavy));
             OnPropertyChanged(nameof(GpuStatusLine));
         }
@@ -82,6 +83,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public bool IsGpuBase => CurrentGpuMode == GpuMode.Base;
     public bool IsGpuLight => CurrentGpuMode == GpuMode.Light;
+    public bool IsGpuFirm => CurrentGpuMode == GpuMode.Firm;
     public bool IsGpuHeavy => CurrentGpuMode == GpuMode.Heavy;
 
     public string GpuStatusLine
@@ -97,7 +99,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             GpuState s = GpuState.Value;
             return CurrentGpuMode switch
             {
-                GpuMode.Light or GpuMode.Heavy => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  capped",
+                GpuMode.Light or GpuMode.Firm or GpuMode.Heavy => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  capped",
                 GpuMode.Base => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  Armoury Crate governs",
                 _ => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  no preset this boot"
             };
@@ -125,7 +127,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         GpuState = state;   // setter re-raises the derived properties
     }
 
-    /// <summary>Applies a GPU power preset (BASE / LIGHT / HEAVY) and re-reads the result.</summary>
+    /// <summary>Applies a GPU power preset (BASE / LIGHT / FIRM / HEAVY) and re-reads the result.</summary>
     public async Task SetGpuModeAsync(GpuMode mode)
     {
         if (IsBusy) return;
