@@ -25,6 +25,20 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Headless helper verbs for the GPU power limit (see GpuPowerService). These run
+        // as short-lived elevated siblings of the main instance, so they must bail out
+        // BEFORE the single-instance mutex and never touch the tray.
+        if (Array.IndexOf(e.Args, "--gpu-apply") >= 0)
+        {
+            Shutdown(GpuPowerService.CliApply());
+            return;
+        }
+        if (Array.IndexOf(e.Args, "--gpu-install") >= 0)
+        {
+            Shutdown(GpuPowerService.CliInstall());
+            return;
+        }
+
         // Single-instance guard: a second launch simply exits.
         _instanceMutex = new Mutex(initiallyOwned: true, MutexName, out bool createdNew);
         if (!createdNew)
@@ -41,7 +55,7 @@ public partial class App : Application
         try { StartupService.EnsureFirstRun(); }
         catch { /* startup registration is best-effort, never fatal */ }
 
-        _viewModel = new MainViewModel(new PowerService());
+        _viewModel = new MainViewModel(new PowerService(), new GpuPowerService());
         _window = new MainWindow(_viewModel);
 
         _tray = new TaskbarIcon

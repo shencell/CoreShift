@@ -3,7 +3,7 @@
 ; Build with:  build\build-installer.ps1   (or)   iscc installer\CoreShift.iss
 
 #define MyAppName "CoreShift"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "CoreShift"
 #define MyAppExeName "CoreShift.exe"
 #define MyAppId "{{B7E6F3A2-2D4B-4C1A-9E77-A1B2C3D4E5F6}"
@@ -47,6 +47,15 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 ; Remove the auto-start entry and per-user marker on uninstall (best-effort).
 Filename: "{cmd}"; Parameters: "/c reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v CoreShift /f"; Flags: runhidden; RunOnceId: "DelRun"
 Filename: "{cmd}"; Parameters: "/c reg delete ""HKCU\Software\CoreShift"" /f";                                          Flags: runhidden; RunOnceId: "DelApp"
+; v1.1: drop the elevated GPU helper task, otherwise it lingers pointing at a deleted exe.
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""CoreShift GPU Limit"" /F";                                   Flags: runhidden; RunOnceId: "DelGpuTask"
+
+[UninstallDelete]
+; v1.1: GPU preset config/handshake state written by the app at runtime.
+Type: files;      Name: "{localappdata}\CoreShift\gpu-config.json"
+Type: files;      Name: "{localappdata}\CoreShift\gpu-target.json"
+Type: files;      Name: "{localappdata}\CoreShift\gpu-result.json"
+Type: dirifempty; Name: "{localappdata}\CoreShift"
 
 [Code]
 { ---- .NET 8 Desktop Runtime detection & on-demand install ---- }

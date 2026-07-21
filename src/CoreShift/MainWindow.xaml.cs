@@ -48,6 +48,21 @@ public partial class MainWindow : Window
         await _viewModel.ToggleAsync();
     }
 
+    private async void GpuBase_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.SetGpuModeAsync(GpuMode.Base);
+    }
+
+    private async void GpuLight_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.SetGpuModeAsync(GpuMode.Light);
+    }
+
+    private async void GpuHeavy_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.SetGpuModeAsync(GpuMode.Heavy);
+    }
+
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
 

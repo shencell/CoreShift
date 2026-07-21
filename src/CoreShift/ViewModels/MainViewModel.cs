@@ -12,12 +12,19 @@ namespace CoreShift.ViewModels;
 public sealed class MainViewModel : INotifyPropertyChanged
 {
     private readonly PowerService _power;
+    private readonly GpuPowerService _gpu;
 
     private int _maxProcessorState = 100;
     private bool _isBusy;
     private string _statusMessage = string.Empty;
+    private GpuState? _gpuState;
+    private string _gpuError = string.Empty;
 
-    public MainViewModel(PowerService power) => _power = power;
+    public MainViewModel(PowerService power, GpuPowerService gpu)
+    {
+        _power = power;
+        _gpu = gpu;
+    }
 
     /// <summary>Current "Maximum processor state" percentage (100 = Coding, 99 = Gaming).</summary>
     public int MaxProcessorState
@@ -55,6 +62,48 @@ public sealed class MainViewModel : INotifyPropertyChanged
         private set { if (_statusMessage != value) { _statusMessage = value; OnPropertyChanged(); } }
     }
 
+    /// <summary>Current GPU readings (null while unknown / NVML unavailable).</summary>
+    public GpuState? GpuState
+    {
+        get => _gpuState;
+        private set
+        {
+            _gpuState = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsGpuBase));
+            OnPropertyChanged(nameof(IsGpuLight));
+            OnPropertyChanged(nameof(IsGpuHeavy));
+            OnPropertyChanged(nameof(GpuStatusLine));
+        }
+    }
+
+    /// <summary>Preset applied in this boot session, as recorded by the elevated helper.</summary>
+    public GpuMode CurrentGpuMode { get; private set; } = GpuMode.Custom;
+
+    public bool IsGpuBase => CurrentGpuMode == GpuMode.Base;
+    public bool IsGpuLight => CurrentGpuMode == GpuMode.Light;
+    public bool IsGpuHeavy => CurrentGpuMode == GpuMode.Heavy;
+
+    public string GpuStatusLine
+    {
+        get
+        {
+            if (!GpuState.HasValue)
+            {
+                // Surface the real NVML error — "unavailable" alone is undebuggable.
+                return _gpuError.Length > 0 ? $"GPU  ·  {_gpuError}" : "GPU  ·  …";
+            }
+
+            GpuState s = GpuState.Value;
+            return CurrentGpuMode switch
+            {
+                GpuMode.Light or GpuMode.Heavy => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  capped",
+                GpuMode.Base => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  Armoury Crate governs",
+                _ => $"GPU  ·  {s.GraphicsClockMhz} MHz  ·  no preset this boot"
+            };
+        }
+    }
+
     /// <summary>Reads the live state from Windows before the widget is shown.</summary>
     public async Task RefreshAsync()
     {
@@ -62,6 +111,39 @@ public sealed class MainViewModel : INotifyPropertyChanged
         int? value = await _power.GetMaxProcessorStateAsync();
         if (value.HasValue)
             MaxProcessorState = value.Value;
+
+        await RefreshGpuAsync();
+    }
+
+    private async Task RefreshGpuAsync()
+    {
+        CurrentGpuMode = _gpu.GetAppliedMode();
+        OnPropertyChanged(nameof(CurrentGpuMode));
+
+        (GpuState? state, string error) = await _gpu.GetStateAsync();
+        _gpuError = error;
+        GpuState = state;   // setter re-raises the derived properties
+    }
+
+    /// <summary>Applies a GPU power preset (BASE / LIGHT / HEAVY) and re-reads the result.</summary>
+    public async Task SetGpuModeAsync(GpuMode mode)
+    {
+        if (IsBusy) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        try
+        {
+            PowerResult result = await _gpu.ApplyModeAsync(mode);
+            if (!result.Success)
+                StatusMessage = result.Message;
+
+            await RefreshGpuAsync();
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     /// <summary>Flips between 100% and 99% and re-reads the result.</summary>

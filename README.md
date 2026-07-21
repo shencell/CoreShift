@@ -1,12 +1,18 @@
 # CoreShift
 
-A zero-overhead Windows tray widget that toggles the CPU **Maximum processor state**
-between **100% (Coding Mode — Turbo Boost ON)** and **99% (Gaming Mode — Turbo Boost OFF)**
-with a single click. Built on .NET 8 / WPF with on-demand XAML rendering.
+**v1.1.0** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
+and a **full-performance** profile in one click — controlling both the **CPU** and the **NVIDIA
+GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
+
+- **CPU** — toggles *Maximum processor state* between **100% (Coding Mode — Turbo Boost ON)** and
+  **99% (Gaming Mode — Turbo Boost OFF)**.
+- **GPU** — **BASE / LIGHT / HEAVY** power presets for the NVIDIA dGPU via NVML.
 
 > Setting the maximum processor state to **99%** is the well-known trick that disables
 > Intel/AMD Turbo Boost — lower temperatures, less fan noise, steadier clocks. **100%**
 > restores full turbo for compiling and heavy workloads.
+
+📄 **[Full technical specification →](docs/SPECIFICATION.md)**
 
 ---
 
@@ -21,6 +27,9 @@ with a single click. Built on .NET 8 / WPF with on-demand XAML rendering.
 - **Auto-start.** Self-registers under `HKCU\…\Run` on first launch; toggle it any time from
   the tray menu.
 - **Small.** Framework-dependent single-file build, well under 5 MB.
+- **GPU power presets** *(v1.1)*. BASE / LIGHT / HEAVY pills cap the NVIDIA dGPU via NVML, with an
+  automatic locked-clock fallback for laptop vBIOSes that refuse power limits — and **no UAC prompt
+  after the first setup**. Coexists with Armoury Crate. [Details ↓](#gpu-presets)
 
 ---
 
@@ -28,22 +37,51 @@ with a single click. Built on .NET 8 / WPF with on-demand XAML rendering.
 
 ```
 src/CoreShift/
-  App.xaml(.cs)            Tray icon, single-instance guard, on-demand show
-  MainWindow.xaml(.cs)     Frameless widget, hover animation, dismiss-on-deactivate
-  ViewModels/MainViewModel Current state + INotifyPropertyChanged for DataTriggers
-  Services/PowerService    powercfg query/set (silent: CreateNoWindow, no shell)
+  App.xaml(.cs)            Entry point + CLI verbs, tray icon, single-instance guard
+  MainWindow.xaml(.cs)     Frameless widget, hover animations, dismiss-on-deactivate
+  ViewModels/MainViewModel All observable state + INotifyPropertyChanged for DataTriggers
+  Services/PowerService    CPU: powercfg query/set (silent: CreateNoWindow, no shell)
+  Services/GpuPowerService GPU: NVML bindings, presets, elevated-helper handshake
   Services/StartupService  HKCU\…\Run registration
   Services/TrayPositioner  Bottom-right geometry via SystemParameters.WorkArea
-installer/CoreShift.iss     Inno Setup script (+ .NET runtime check)
+  Services/MemoryUtil      Working-set trimming on idle
+installer/CoreShift.iss     Inno Setup script (+ .NET runtime check, uninstall cleanup)
 build/                      generate-icon.ps1, publish.ps1, build-installer.ps1
 ```
 
 | Phase | What happens |
 |------|---------------|
 | 1. Init | Launch hidden, tray icon registers, app goes passive. |
-| 2. Check | Left-click → `powercfg -q … PROCTHROTTLEMAX` read silently. |
+| 2. Check | Left-click → CPU read via `powercfg -q … PROCTHROTTLEMAX` **and** GPU read via NVML. |
 | 3. Render | Window positioned bottom-right via `WorkArea`, shown with the matching icon. |
-| 4. Toggle | Button flips 100%↔99% via `powercfg`; DataTrigger swaps the icon; window hides on focus loss. |
+| 4. Act | Tile flips CPU 100%↔99%; GPU pills apply a preset. DataTriggers re-render instantly. |
+| 5. Dismiss | On focus loss: hide, collect, and trim the working set back to the OS. |
+
+One executable, three roles — `CoreShift.exe` (tray), `--gpu-apply` (elevated helper),
+`--gpu-install` (one-time task registration). See the [specification](docs/SPECIFICATION.md#31-process-model).
+
+---
+
+## GPU presets
+
+| Pill | Effect |
+|---|---|
+| **BASE** | Removes CoreShift's cap — power limit back to vBIOS max, clocks unlocked. Armoury Crate governs. |
+| **LIGHT** | ~40–60 W envelope. Default 50 W, or 990 MHz locked-clock fallback. |
+| **HEAVY** | ~60–80 W envelope. Default 70 W, or 1402 MHz locked-clock fallback. |
+
+The software power limit is tried first; laptop vBIOSes that reject it
+(`NVML_ERROR_NOT_SUPPORTED`) automatically fall back to locked GPU clocks (the `nvidia-smi -lgc`
+API). Tune the values in `%LOCALAPPDATA%\CoreShift\gpu-config.json`:
+
+```json
+{ "LightWatts": 50, "HeavyWatts": 70, "LightMaxMhz": 990, "HeavyMaxMhz": 1402 }
+```
+
+**Elevation:** NVML *reads* need no rights, so live data always shows. *Writes* do — so the first
+preset you apply registers a scheduled task (**one UAC prompt, once ever**); after that, switching
+modes never prompts again. No ASUS ACPI/WMI paths are touched, so this coexists with Armoury
+Crate. Both GPU knobs reset on reboot, so the applied preset is tracked per boot session.
 
 ---
 
@@ -61,7 +99,7 @@ Or step by step:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File build\generate-icon.ps1   # -> Assets\CoreShift.ico
 build\publish.ps1                                                       # -> dist\CoreShift.exe
-iscc installer\CoreShift.iss                                           # -> installer_output\CoreShift-Setup-1.0.0.exe
+iscc installer\CoreShift.iss                                           # -> installer_output\CoreShift-Setup-1.1.0.exe
 ```
 
 Tooling install (if needed):
@@ -70,6 +108,23 @@ Tooling install (if needed):
 winget install Microsoft.DotNet.SDK.8
 winget install JRSoftware.InnoSetup
 ```
+
+> **Releasing a new version:** bump `<Version>`/`<FileVersion>`/`<AssemblyVersion>` in
+> `src/CoreShift/CoreShift.csproj` **and** `MyAppVersion` in `installer/CoreShift.iss` — they are
+> independent and must be kept in sync.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| GPU row shows an NVML error | No NVIDIA dGPU, or the driver's `nvml.dll` couldn't be found. CPU toggling is unaffected. |
+| `…vBIOS refuses the change` | Normal on laptops — CoreShift automatically falls back to locked clocks. |
+| `GPU helper did not respond` | The `CoreShift GPU Limit` scheduled task is blocked or was deleted. Delete it in Task Scheduler and apply a preset again to re-register. |
+| UAC prompt appears when applying a GPU preset | Expected **once ever** (task registration). If it repeats, the task isn't persisting — check Task Scheduler policy. |
+| GPU preset resets after reboot | By design. Both NVML knobs are volatile; re-apply after boot. |
+| CPU toggle reports an error | A policy is blocking `powercfg` writes to the active scheme; relaunch CoreShift elevated. |
 
 ---
 
@@ -84,6 +139,13 @@ winget install JRSoftware.InnoSetup
 - **Permissions.** The app runs `asInvoker` (no UAC prompt at boot). Changing the active power
   scheme normally succeeds for the current user; if a hardened policy blocks it, `powercfg`
   returns an error and CoreShift shows it in the widget — relaunch elevated in that case.
+
+- **Why a scheduled task for the GPU?** NVML *reads* need no elevation but *writes* do. Making the
+  whole app elevated would mean a UAC prompt on every boot. Instead CoreShift registers a task at
+  `RunLevel HIGHEST` once (one prompt, ever) and starts it on demand — Windows lets a task's own
+  creator do that without prompting again. The UI and the elevated helper coordinate through a
+  nonce written to `%LOCALAPPDATA%\CoreShift`, not `HKCU`, because an elevated task process isn't
+  guaranteed to see the same user registry hive.
 
 - **PROCTHROTTLEMAX** is a hidden setting by default; `powercfg` can still read and write it
   without un-hiding it. Both AC and DC indices are written, then `SCHEME_CURRENT` is reactivated.
