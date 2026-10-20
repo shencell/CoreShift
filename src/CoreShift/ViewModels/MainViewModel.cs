@@ -92,8 +92,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             if (!GpuState.HasValue)
             {
-                // Surface the real NVML error — "unavailable" alone is undebuggable.
-                return _gpuError.Length > 0 ? $"GPU  ·  {_gpuError}" : "GPU  ·  …";
+                // Remove text display when GPU state unavailable (e.g., no NVIDIA GPU)
+                return string.Empty;
             }
 
             GpuState s = GpuState.Value;

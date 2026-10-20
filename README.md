@@ -1,6 +1,6 @@
 # CoreShift
 
-**v1.2.0** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
+**v1.2.1** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
 and a **full-performance** profile in one click — controlling both the **CPU** and the **NVIDIA
 GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
 

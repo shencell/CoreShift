@@ -403,19 +403,28 @@ public sealed class GpuPowerService
         {
             if (name != Lib) return IntPtr.Zero;
 
-            if (NativeLibrary.TryLoad("nvml.dll", out IntPtr handle))
+            IntPtr handle = IntPtr.Zero;
+
+            // First, try to load the newest nvml.dll from DriverStore (common on laptops)
+            string repo = Path.Combine(Environment.SystemDirectory, "DriverStore", "FileRepository");
+            if (Directory.Exists(repo))
+            {
+                foreach (var dir in Directory.EnumerateDirectories(repo, "nv*")
+                                 .OrderByDescending(d => Directory.GetLastWriteTimeUtc(d)))
+                {
+                    string dllPath = Path.Combine(dir, "nvml.dll");
+                    if (File.Exists(dllPath) && NativeLibrary.TryLoad(dllPath, out handle))
+                    {
+                        return handle;
+                    }
+                }
+            }
+
+            // Fallback to the standard loader (works for desktop/datacenter drivers)
+            if (NativeLibrary.TryLoad("nvml.dll", out handle))
                 return handle;
 
-            string repo = Path.Combine(Environment.SystemDirectory, "DriverStore", "FileRepository");
-            string? dll = Directory.Exists(repo)
-                ? Directory.EnumerateDirectories(repo, "nv*")
-                    .Select(dir => Path.Combine(dir, "nvml.dll"))
-                    .Where(File.Exists)
-                    .OrderByDescending(File.GetLastWriteTimeUtc)
-                    .FirstOrDefault()
-                : null;
-
-            return dll is not null && NativeLibrary.TryLoad(dll, out handle) ? handle : IntPtr.Zero;
+            return IntPtr.Zero;
         }
 
         /// <summary>Init → device 0 → <paramref name="body"/> → shutdown, with error mapping.</summary>

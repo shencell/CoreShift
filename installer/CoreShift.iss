@@ -3,7 +3,7 @@
 ; Build with:  build\build-installer.ps1   (or)   iscc installer\CoreShift.iss
 
 #define MyAppName "CoreShift"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "CoreShift"
 #define MyAppExeName "CoreShift.exe"
 #define MyAppId "{{B7E6F3A2-2D4B-4C1A-9E77-A1B2C3D4E5F6}"
