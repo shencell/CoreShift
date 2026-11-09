@@ -1,4 +1,6 @@
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -22,9 +24,37 @@ public partial class App : Application
     private TaskbarIcon? _tray;
     private MainWindow? _window;
     private MainViewModel? _viewModel;
+    private VolumeLimitService? _volumeLimit;
+
+    // Static constructor runs before any instance members - sets culture to avoid
+    // "Cannot find non-neutral culture related to 'en-us'" in invariant globalization mode.
+    static App()
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Threading.Thread.CurrentThread.CurrentCulture = culture;
+        System.Threading.Thread.CurrentThread.CurrentUICulture = culture;
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture;
+        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
+    }
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Global exception handlers to prevent silent crashes
+        DispatcherUnhandledException += (_, args) =>
+        {
+            args.Handled = true;
+            LogException(args.Exception);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            LogException(args.ExceptionObject as Exception);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            args.SetObserved();
+            LogException(args.Exception);
+        };
+
         // Headless helper verbs for the GPU power limit (see GpuPowerService). These run
         // as short-lived elevated siblings of the main instance, so they must bail out
         // BEFORE the single-instance mutex and never touch the tray.
@@ -36,6 +66,18 @@ public partial class App : Application
         if (Array.IndexOf(e.Args, "--gpu-install") >= 0)
         {
             Shutdown(GpuPowerService.CliInstall());
+            return;
+        }
+
+        // Headless helper verbs for the volume limit
+        if (Array.IndexOf(e.Args, "--volume-apply") >= 0)
+        {
+            Shutdown(VolumeLimitService.CliApply());
+            return;
+        }
+        if (Array.IndexOf(e.Args, "--volume-install") >= 0)
+        {
+            Shutdown(VolumeLimitService.CliInstall());
             return;
         }
 
@@ -55,8 +97,12 @@ public partial class App : Application
         try { StartupService.EnsureFirstRun(); }
         catch { /* startup registration is best-effort, never fatal */ }
 
-        _viewModel = new MainViewModel(new PowerService(), new GpuPowerService());
+        _volumeLimit = new VolumeLimitService();
+        _viewModel = new MainViewModel(new PowerService(), new GpuPowerService(), _volumeLimit);
         _window = new MainWindow(_viewModel);
+
+        // Initialize volume limiter (non-blocking, errors surfaced in widget)
+        _ = _viewModel.InitializeVolumeLimitAsync();
 
         _tray = new TaskbarIcon
         {
@@ -125,6 +171,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         _tray?.Dispose();
+        _volumeLimit?.Dispose();
 
         if (_instanceMutex is not null)
         {
@@ -133,5 +180,19 @@ public partial class App : Application
         }
 
         base.OnExit(e);
+    }
+
+    private void LogException(Exception? ex)
+    {
+        if (ex == null) return;
+        try
+        {
+            string logPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CoreShift", "crash.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}\n\n");
+        }
+        catch { /* best effort */ }
     }
 }

@@ -11,12 +11,24 @@ namespace CoreShift;
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
+    private DispatcherTimer? _volumeDebounceTimer;
 
     public MainWindow(MainViewModel viewModel)
     {
         _viewModel = viewModel;
         DataContext = viewModel;
         InitializeComponent();
+
+        // Debounce timer for volume slider changes
+        _volumeDebounceTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(300)
+        };
+        _volumeDebounceTimer.Tick += async (_, _) =>
+        {
+            _volumeDebounceTimer.Stop();
+            await _viewModel.SetVolumeLimitAsync();
+        };
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -66,6 +78,55 @@ public partial class MainWindow : Window
     private async void GpuHeavy_Click(object sender, RoutedEventArgs e)
     {
         await _viewModel.SetGpuModeAsync(GpuMode.Heavy);
+    }
+
+    // Volume Limit event handlers
+    private async void VolumeLockButton_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.ToggleVolumeLimitAsync();
+    }
+
+    private void VolumeLimitSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        // Debounce: only apply after user stops dragging for 300ms
+        _volumeDebounceTimer?.Stop();
+        _volumeDebounceTimer?.Start();
+    }
+
+    private async void VolumeLimitTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        _volumeDebounceTimer?.Stop();
+        if (sender is System.Windows.Controls.TextBox tb)
+        {
+            if (int.TryParse(tb.Text, out int value))
+            {
+                _viewModel.VolumeLimitPercentText = Math.Clamp(value, 1, 100).ToString();
+                await _viewModel.SetVolumeLimitAsync();
+            }
+            else
+            {
+                // Reset to current valid value
+                tb.Text = _viewModel.VolumeLimitPercentText;
+            }
+        }
+    }
+
+    private async void VolumeLimitTextBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter && sender is System.Windows.Controls.TextBox tb)
+        {
+            _volumeDebounceTimer?.Stop();
+            if (int.TryParse(tb.Text, out int value))
+            {
+                _viewModel.VolumeLimitPercentText = Math.Clamp(value, 1, 100).ToString();
+                await _viewModel.SetVolumeLimitAsync();
+            }
+            else
+            {
+                tb.Text = _viewModel.VolumeLimitPercentText;
+            }
+            tb.MoveFocus(new System.Windows.Input.TraversalRequest(System.Windows.Input.FocusNavigationDirection.Next));
+        }
     }
 
     private const int GWL_EXSTYLE = -20;

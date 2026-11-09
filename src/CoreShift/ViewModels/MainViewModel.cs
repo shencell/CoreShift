@@ -13,6 +13,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 {
     private readonly PowerService _power;
     private readonly GpuPowerService _gpu;
+    private readonly VolumeLimitService _volumeLimit;
 
     private int _maxProcessorState = 100;
     private bool _isBusy;
@@ -20,10 +21,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private GpuState? _gpuState;
     private string _gpuError = string.Empty;
 
-    public MainViewModel(PowerService power, GpuPowerService gpu)
+    // Volume limit state
+    private float _volumeLimitPercent = 50f;
+    private bool _volumeLimitEnabled = true;
+    private string _volumeLimitPercentText = "50";
+
+    public MainViewModel(PowerService power, GpuPowerService gpu, VolumeLimitService volumeLimit)
     {
         _power = power;
         _gpu = gpu;
+        _volumeLimit = volumeLimit;
     }
 
     /// <summary>Current "Maximum processor state" percentage (100 = Coding, 99 = Gaming).</summary>
@@ -173,6 +180,109 @@ public sealed class MainViewModel : INotifyPropertyChanged
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    // Volume Limit Properties
+    public float VolumeLimitPercent
+    {
+        get => _volumeLimitPercent;
+        set
+        {
+            value = Math.Clamp(value, 1f, 100f);
+            if (Math.Abs(_volumeLimitPercent - value) < 0.01f) return;
+            _volumeLimitPercent = value;
+            VolumeLimitPercentText = ((int)Math.Round(value)).ToString();
+            OnPropertyChanged();
+        }
+    }
+
+    public bool VolumeLimitEnabled
+    {
+        get => _volumeLimitEnabled;
+        set
+        {
+            if (_volumeLimitEnabled == value) return;
+            _volumeLimitEnabled = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(VolumeLimitTooltip));
+        }
+    }
+
+    public string VolumeLimitPercentText
+    {
+        get => _volumeLimitPercentText;
+        set
+        {
+            if (_volumeLimitPercentText == value) return;
+            _volumeLimitPercentText = value;
+            if (int.TryParse(value, out int parsed))
+            {
+                VolumeLimitPercent = Math.Clamp(parsed, 1, 100);
+            }
+            OnPropertyChanged();
+        }
+    }
+
+    public string VolumeLimitTooltip => VolumeLimitEnabled ? "Unlock volume limit" : "Lock volume limit";
+
+    /// <summary>Applies the current volume limit percentage.</summary>
+    public async Task SetVolumeLimitAsync()
+    {
+        if (IsBusy) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        try
+        {
+            float scalar = VolumeLimitPercent / 100f;
+            PowerResult result = await _volumeLimit.SetLimitAsync(scalar);
+            if (!result.Success)
+                StatusMessage = result.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>Toggles the volume limit enabled state.</summary>
+    public async Task ToggleVolumeLimitAsync()
+    {
+        if (IsBusy) return;
+
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        try
+        {
+            PowerResult result = await _volumeLimit.SetEnabledAsync(!VolumeLimitEnabled);
+            if (result.Success)
+            {
+                VolumeLimitEnabled = !VolumeLimitEnabled;
+            }
+            else
+            {
+                StatusMessage = result.Message;
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>Initializes the volume limiter on startup.</summary>
+    public async Task InitializeVolumeLimitAsync()
+    {
+        PowerResult result = await _volumeLimit.InitializeAsync();
+        if (!result.Success)
+        {
+            StatusMessage = result.Message;
+        }
+        else
+        {
+            VolumeLimitPercent = _volumeLimit.MaxVolumeScalar * 100f;
+            VolumeLimitEnabled = _volumeLimit.Enabled;
         }
     }
 

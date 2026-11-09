@@ -1,7 +1,8 @@
 <Window x:Class="CoreShift.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="308" Height="392"
+        xmlns:local="clr-namespace:CoreShift.Converters"
+        Width="308" Height="450"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
@@ -12,18 +13,188 @@
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType"
-        FontFamily="Segoe UI">
+        FontFamily="Segoe UI"
+        Language="en-US">
 
     <Window.Resources>
+        <!-- Converters -->
+        <local:BoolToTooltipConverter x:Key="BoolToTooltipConverter"/>
+        <local:TrackWidthConverter x:Key="TrackWidthConverter"/>
+
         <!-- Palette -->
-        <SolidColorBrush x:Key="SurfaceBrush" Color="#FF121212"/>
-        <SolidColorBrush x:Key="HairlineBrush" Color="#FF262626"/>
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FF1E1E1E"/>
+        <SolidColorBrush x:Key="HairlineBrush" Color="#FF333333"/>
         <SolidColorBrush x:Key="TextPrimary" Color="#FFF5F5F5"/>
-        <SolidColorBrush x:Key="TextSecondary" Color="#FF9E9E9E"/>
-        <SolidColorBrush x:Key="AccentTextBrush" Color="#FF66BB6A"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#FFB0B0B0"/>
+        <SolidColorBrush x:Key="AccentTextBrush" Color="#FF4CAF50"/>
         <SolidColorBrush x:Key="ErrorBrush" Color="#FFEF5350"/>
 
-        <!-- The single large action tile: idle #1A1A1A, smoothly transitions to #1B5E20 on hover -->
+        <!-- Button idle background (used across VolumeLockButtonStyle, ToggleTileStyle, GpuPillStyle, VolumeTextBoxStyle) -->
+        <SolidColorBrush x:Key="ButtonIdleBrush" Color="#FF2D2D2D"/>
+        <SolidColorBrush x:Key="ButtonHoverBrush" Color="#FF388E3C"/>
+
+        <!-- Volume limit lock button: idle #2D2D2D, green when active (locked) -->
+        <Style x:Key="VolumeLockButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Width" Value="40"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="LockBtn" CornerRadius="10" Padding="8"
+                                BorderThickness="1.5" BorderBrush="Transparent"
+                                Background="{StaticResource ButtonIdleBrush}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <ColorAnimation Storyboard.TargetName="LockBtn"
+                                                            Storyboard.TargetProperty="Background.Color"
+                                                            To="#FF388E3C" Duration="0:0:0.18"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <ColorAnimation Storyboard.TargetName="LockBtn"
+                                                            Storyboard.TargetProperty="Background.Color"
+                                                            To="#FF2D2D2D" Duration="0:0:0.22"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="LockBtn" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <!-- Locked state: green border + accent text -->
+                            <DataTrigger Binding="{Binding VolumeLimitEnabled}" Value="True">
+                                <Setter TargetName="LockBtn" Property="BorderBrush" Value="{StaticResource AccentTextBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentTextBrush}"/>
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Volume slider style: dark track with accent fill, green thumb -->
+        <Style x:Key="VolumeSliderStyle" TargetType="Slider">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="4,0,8,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid x:Name="SliderGrid">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto" MinHeight="{TemplateBinding MinHeight}"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TickBar x:Name="TopTick" Visibility="Collapsed" Grid.Row="0" Height="4" Fill="{TemplateBinding Foreground}"/>
+                            <!-- Visible track: dark background with accent fill showing current value (rendered BEFORE Track so thumb is on top) -->
+                            <Grid Grid.Row="1" Margin="9,0,9,0" VerticalAlignment="Center">
+                                <!-- Track background -->
+                                <Border Height="6" CornerRadius="3"
+                                        Background="{StaticResource ButtonIdleBrush}"
+                                        BorderBrush="{StaticResource HairlineBrush}"
+                                        BorderThickness="1"/>
+                                <!-- Track fill (binds to slider Value) -->
+                                <Border x:Name="TrackFill" Height="6" CornerRadius="3"
+                                        Background="{StaticResource AccentTextBrush}"
+                                        HorizontalAlignment="Left">
+                                    <Border.Width>
+                                        <MultiBinding Converter="{StaticResource TrackWidthConverter}">
+                                            <Binding Path="Value" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                            <Binding Path="Minimum" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                            <Binding Path="Maximum" RelativeSource="{RelativeSource TemplatedParent}"/>
+                                            <Binding Path="ActualWidth" ElementName="SliderGrid"/>
+                                        </MultiBinding>
+                                    </Border.Width>
+                                </Border>
+                            </Grid>
+                            <Track Grid.Row="1" x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Background="Transparent" BorderThickness="0"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb x:Name="Thumb" Width="18" Height="18">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{StaticResource AccentTextBrush}" Stroke="{StaticResource SurfaceBrush}" StrokeThickness="2"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Background="Transparent" BorderThickness="0"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                            <TickBar x:Name="BottomTick" Visibility="Collapsed" Grid.Row="2" Height="4" Fill="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Volume numeric input textbox style -->
+        <Style x:Key="VolumeTextBoxStyle" TargetType="TextBox">
+            <Setter Property="Width" Value="50"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="{StaticResource ButtonIdleBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="CaretBrush" Value="{StaticResource AccentTextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Border" CornerRadius="8"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsFocused" Value="True">
+                                <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource AccentTextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#FF555555"/>
+                                <Setter Property="Background" Value="#FF1E1E1E"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Lock icon (closed padlock) -->
+        <Style x:Key="LockIconStyle" TargetType="Viewbox">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+        </Style>
+
+        <!-- Unlock icon (open padlock) -->
+        <Style x:Key="UnlockIconStyle" TargetType="Viewbox">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+        </Style>
+
+        <!-- The single large action tile: idle #2D2D2D, smoothly transitions to #388E3C on hover -->
         <Style x:Key="ToggleTileStyle" TargetType="Button">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -31,10 +202,8 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="Tile" CornerRadius="16" Padding="16">
-                            <Border.Background>
-                                <SolidColorBrush Color="#FF1A1A1A"/>
-                            </Border.Background>
+                        <Border x:Name="Tile" CornerRadius="16" Padding="16"
+                                Background="{StaticResource ButtonIdleBrush}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -44,7 +213,7 @@
                                         <Storyboard>
                                             <ColorAnimation Storyboard.TargetName="Tile"
                                                             Storyboard.TargetProperty="Background.Color"
-                                                            To="#FF1B5E20" Duration="0:0:0.18"/>
+                                                            To="#FF388E3C" Duration="0:0:0.18"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.EnterActions>
@@ -53,7 +222,7 @@
                                         <Storyboard>
                                             <ColorAnimation Storyboard.TargetName="Tile"
                                                             Storyboard.TargetProperty="Background.Color"
-                                                            To="#FF1A1A1A" Duration="0:0:0.22"/>
+                                                            To="#FF2D2D2D" Duration="0:0:0.22"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.ExitActions>
@@ -87,7 +256,7 @@
             </Style.Triggers>
         </Style>
 
-        <!-- GPU preset pills: idle #1A1A1A, hover fade like the main tile, solid green when active -->
+        <!-- GPU preset pills: idle #2D2D2D, hover fade like the main tile, solid green when active -->
         <Style x:Key="GpuPillStyle" TargetType="Button">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -98,10 +267,8 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Pill" CornerRadius="10" Padding="0,9" Margin="3,0"
-                                BorderThickness="1.5" BorderBrush="Transparent">
-                            <Border.Background>
-                                <SolidColorBrush Color="#FF1A1A1A"/>
-                            </Border.Background>
+                                BorderThickness="1.5" BorderBrush="Transparent"
+                                Background="{StaticResource ButtonIdleBrush}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
@@ -111,7 +278,7 @@
                                         <Storyboard>
                                             <ColorAnimation Storyboard.TargetName="Pill"
                                                             Storyboard.TargetProperty="Background.Color"
-                                                            To="#FF1B5E20" Duration="0:0:0.18"/>
+                                                            To="#FF388E3C" Duration="0:0:0.18"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.EnterActions>
@@ -120,7 +287,7 @@
                                         <Storyboard>
                                             <ColorAnimation Storyboard.TargetName="Pill"
                                                             Storyboard.TargetProperty="Background.Color"
-                                                            To="#FF1A1A1A" Duration="0:0:0.22"/>
+                                                            To="#FF2D2D2D" Duration="0:0:0.22"/>
                                         </Storyboard>
                                     </BeginStoryboard>
                                 </Trigger.ExitActions>
@@ -153,7 +320,8 @@
         <Grid Margin="18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="*" MinHeight="160"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
@@ -257,8 +425,53 @@
                 </UniformGrid>
             </StackPanel>
 
+            <!-- Global Volume Limit -->
+            <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                <TextBlock Text="GLOBAL VOLUME LIMIT"
+                           Foreground="{StaticResource TextSecondary}"
+                           FontSize="10.5" HorizontalAlignment="Center"/>
+                <Grid Margin="0,7,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Lock/Unlock Button -->
+                    <Button Grid.Column="0" x:Name="VolumeLockButton"
+                            Style="{StaticResource VolumeLockButtonStyle}"
+                            Click="VolumeLockButton_Click"
+                            ToolTip="{Binding VolumeLimitTooltip}">
+                        <Button.Content>
+                            <Viewbox Style="{StaticResource LockIconStyle}">
+                                <!-- Locked icon (closed padlock) -->
+                                <Canvas Width="24" Height="24">
+                                    <Path Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
+                                          Data="F1 M18,8 C18,5.239 15.761,3 13,3 C10.239,3 8,5.239 8,8 L8,11 L6,11 C4.895,11 4,11.895 4,13 L4,20 C4,21.105 4.895,22 6,22 L18,22 C19.105,22 20,21.105 20,20 L20,13 C20,11.895 19.105,11 18,11 L18,8 Z M13,5 C15.761,5 18,7.239 18,10 L18,11 L13,11 L13,10 C13,7.239 15.761,5 13,5 Z M13,15 L11,15 L11,17 L13,17 L13,15 Z M13,19 L11,19 L11,21 L13,21 L13,19 Z"/>
+                                </Canvas>
+                            </Viewbox>
+                        </Button.Content>
+                    </Button>
+
+                    <!-- Volume Slider -->
+                    <Slider Grid.Column="1" x:Name="VolumeLimitSlider"
+                            Minimum="1" Maximum="100" Value="{Binding VolumeLimitPercent, Mode=TwoWay}"
+                            Style="{StaticResource VolumeSliderStyle}"
+                            ValueChanged="VolumeLimitSlider_ValueChanged"
+                            IsEnabled="{Binding VolumeLimitEnabled}"/>
+
+                    <!-- Numeric Input -->
+                    <TextBox Grid.Column="2" x:Name="VolumeLimitTextBox"
+                             Text="{Binding VolumeLimitPercentText, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource VolumeTextBoxStyle}"
+                             IsEnabled="{Binding VolumeLimitEnabled}"
+                             LostFocus="VolumeLimitTextBox_LostFocus"
+                             KeyDown="VolumeLimitTextBox_KeyDown"/>
+                </Grid>
+            </StackPanel>
+
             <!-- Error / status line (empty in the happy path) -->
-            <TextBlock Grid.Row="3" Text="{Binding StatusMessage}"
+            <TextBlock Grid.Row="4" Text="{Binding StatusMessage}"
                        Foreground="{StaticResource ErrorBrush}"
                        FontSize="10.5" TextWrapping="Wrap"
                        TextAlignment="Center" HorizontalAlignment="Center"

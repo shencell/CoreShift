@@ -3,7 +3,7 @@
 ; Build with:  build\build-installer.ps1   (or)   iscc installer\CoreShift.iss
 
 #define MyAppName "CoreShift"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.3.2"
 #define MyAppPublisher "CoreShift"
 #define MyAppExeName "CoreShift.exe"
 #define MyAppId "{{B7E6F3A2-2D4B-4C1A-9E77-A1B2C3D4E5F6}"
@@ -49,12 +49,16 @@ Filename: "{cmd}"; Parameters: "/c reg delete ""HKCU\Software\Microsoft\Windows\
 Filename: "{cmd}"; Parameters: "/c reg delete ""HKCU\Software\CoreShift"" /f";                                          Flags: runhidden; RunOnceId: "DelApp"
 ; v1.1: drop the elevated GPU helper task, otherwise it lingers pointing at a deleted exe.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""CoreShift GPU Limit"" /F";                                   Flags: runhidden; RunOnceId: "DelGpuTask"
+; v1.2: drop the volume limit scheduled task
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""CoreShift Volume Limit"" /F";                                Flags: runhidden; RunOnceId: "DelVolTask"
 
 [UninstallDelete]
 ; v1.1: GPU preset config/handshake state written by the app at runtime.
 Type: files;      Name: "{localappdata}\CoreShift\gpu-config.json"
 Type: files;      Name: "{localappdata}\CoreShift\gpu-target.json"
 Type: files;      Name: "{localappdata}\CoreShift\gpu-result.json"
+; v1.2: volume limit config
+Type: files;      Name: "{localappdata}\CoreShift\volume-limit.json"
 Type: dirifempty; Name: "{localappdata}\CoreShift"
 
 [Code]
