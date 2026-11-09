@@ -1,12 +1,14 @@
 # CoreShift
 
-**v1.2.1** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
-and a **full-performance** profile in one click — controlling both the **CPU** and the **NVIDIA
-GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
+**v1.3.2** · A zero-overhead Windows tray widget that shifts your laptop between a **quiet/cool**
+and a **full-performance** profile in one click — controlling the **CPU**, the **NVIDIA GPU**,
+and the **system volume ceiling**. Built on .NET 8 / WPF with on-demand XAML rendering.
 
 - **CPU** — toggles *Maximum processor state* between **100% (Coding Mode — Turbo Boost ON)** and
   **99% (Gaming Mode — Turbo Boost OFF)**.
 - **GPU** — **BASE / LIGHT / FIRM / HEAVY** power presets for the NVIDIA dGPU via NVML.
+- **Volume** — global maximum volume limit (1–100 %) that clamps master volume and every
+  active session, survives endpoint switches, and restores on logon via a scheduled task.
 
 > Setting the maximum processor state to **99%** is the well-known trick that disables
 > Intel/AMD Turbo Boost — lower temperatures, less fan noise, steadier clocks. **100%**
@@ -30,6 +32,10 @@ GPU**. Built on .NET 8 / WPF with on-demand XAML rendering.
 - **GPU power presets.** BASE / LIGHT / FIRM / HEAVY pills cap the NVIDIA dGPU via NVML, with an
   automatic locked-clock fallback for laptop vBIOSes that refuse power limits — and **no UAC prompt
   after the first setup**. Coexists with Armoury Crate. [Details ↓](#gpu-presets)
+- **Volume limit.** Global volume ceiling (default 50 %) that clamps the master volume and *every*
+  active audio session in real time via Core Audio APIs. Re-applies on endpoint changes (e.g.,
+  headphone plug/unplug) and restores automatically on logon through a scheduled task — **no UAC
+  prompt ever**. [Details ↓](#volume-limit)
 
 ---
 
@@ -40,13 +46,15 @@ src/CoreShift/
   App.xaml(.cs)            Entry point + CLI verbs, tray icon, single-instance guard
   MainWindow.xaml(.cs)     Frameless widget, hover animations, dismiss-on-deactivate
   ViewModels/MainViewModel All observable state + INotifyPropertyChanged for DataTriggers
-  Services/PowerService    CPU: powercfg query/set (silent: CreateNoWindow, no shell)
-  Services/GpuPowerService GPU: NVML bindings, presets, elevated-helper handshake
-  Services/StartupService  HKCU\…\Run registration
-  Services/TrayPositioner  Bottom-right geometry via SystemParameters.WorkArea
-  Services/MemoryUtil      Working-set trimming on idle
-installer/CoreShift.iss     Inno Setup script (+ .NET runtime check, uninstall cleanup)
-build/                      generate-icon.ps1, publish.ps1, build-installer.ps1
+  Services/PowerService       CPU: powercfg query/set (silent: CreateNoWindow, no shell)
+  Services/GpuPowerService    GPU: NVML bindings, presets, elevated-helper handshake
+  Services/VolumeLimitService Volume: Core Audio APIs, per-session clamp, logon task
+  Services/StartupService     HKCU\…\Run registration
+  Services/TrayPositioner     Bottom-right geometry via SystemParameters.WorkArea
+  Services/MemoryUtil         Working-set trimming on idle
+  Services/CoreAudio/         COM interop: IMMDevice, IAudioEndpointVolume, IAudioSessionManager2
+installer/CoreShift.iss       Inno Setup script (+ .NET runtime check, uninstall cleanup)
+build/                        generate-icon.ps1, publish.ps1, build-installer.ps1
 ```
 
 | Phase | What happens |
@@ -54,11 +62,12 @@ build/                      generate-icon.ps1, publish.ps1, build-installer.ps1
 | 1. Init | Launch hidden, tray icon registers, app goes passive. |
 | 2. Check | Left-click → CPU read via `powercfg -q … PROCTHROTTLEMAX` **and** GPU read via NVML. |
 | 3. Render | Window positioned bottom-right via `WorkArea`, shown with the matching icon. |
-| 4. Act | Tile flips CPU 100%↔99%; GPU pills apply a preset. DataTriggers re-render instantly. |
+| 4. Act | Tile flips CPU 100%↔99%; GPU pills apply a preset; Volume slider sets ceiling. DataTriggers re-render instantly. |
 | 5. Dismiss | On focus loss: hide, collect, and trim the working set back to the OS. |
 
-One executable, three roles — `CoreShift.exe` (tray), `--gpu-apply` (elevated helper),
-`--gpu-install` (one-time task registration). See the [specification](docs/SPECIFICATION.md#31-process-model).
+One executable, **five roles** — `CoreShift.exe` (tray), `--gpu-apply` (elevated helper),
+`--gpu-install` (one-time GPU task registration), `--volume-apply` (logon helper),
+`--volume-install` (one-time volume task registration). See the [specification](docs/SPECIFICATION.md#31-process-model).
 
 ---
 
@@ -93,6 +102,46 @@ Crate. Both GPU knobs reset on reboot, so the applied preset is tracked per boot
 
 ---
 
+## Volume limit
+
+The volume limiter enforces a **global maximum volume** (default 50 %) that applies to:
+
+- The **master endpoint volume** — the system slider you see in the volume flyout
+- **Every active audio session** — each app's individual stream (Spotify, browser, games, etc.)
+- **New sessions automatically** — the moment an app starts playing, its volume is clamped
+- **Endpoint switches** — plugging/unplugging headphones, switching to Bluetooth, docking stations
+
+### How it works
+
+| Layer | Mechanism |
+|---|---|
+| **Master volume** | `IAudioEndpointVolume` callbacks + 2 s polling fallback |
+| **Per-session** | `IAudioSessionManager2` → `ISimpleAudioVolume` on each session |
+| **New sessions** | `IAudioSessionNotification` callback clamps on creation |
+| **Endpoint change** | `IMMNotificationClient` re-initialises on default device swap |
+| **Logon restore** | Scheduled task `CoreShift Volume Limit` runs `--volume-apply` at logon |
+
+All clamping happens in-process (no elevation needed — Core Audio APIs are per-user). The scheduled task runs at **normal** privilege (`/RL HIGHEST` for consistency with the GPU task, but audio doesn't require elevation), triggered once at logon, and the UI can also invoke it on demand.
+
+### Configuration
+
+Stored in `%LOCALAPPDATA%\CoreShift\volume-limit.json`:
+
+```json
+{ "MaxVolumeScalar": 0.5, "Enabled": true }
+```
+
+- `MaxVolumeScalar`: 0.01–1.0 (1 %–100 %). Default **0.5** (50 %).
+- `Enabled`: `true` / `false` to toggle the limiter on/off without losing the value.
+
+The file is self-healing: missing/invalid values are reset to defaults on next load.
+
+### Why a scheduled task?
+
+The task (`CoreShift Volume Limit`, `ONCE` at `00:00`, started on demand) ensures the limit is reapplied at every logon **without any UAC prompt** — Core Audio doesn't need elevation, but the task pattern guarantees it runs in the correct user session even if the tray app isn't set to auto-start.
+
+---
+
 ## Build
 
 Prerequisites: **.NET 8 SDK** and (for the installer) **Inno Setup 6**.
@@ -107,7 +156,7 @@ Or step by step:
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File build\generate-icon.ps1   # -> Assets\CoreShift.ico
 build\publish.ps1                                                       # -> dist\CoreShift.exe
-iscc installer\CoreShift.iss                                           # -> installer_output\CoreShift-Setup-1.1.0.exe
+iscc installer\CoreShift.iss                                           # -> installer_output\CoreShift-Setup-1.3.2.exe
 ```
 
 Tooling install (if needed):
@@ -133,6 +182,9 @@ winget install JRSoftware.InnoSetup
 | UAC prompt appears when applying a GPU preset | Expected **once ever** (task registration). If it repeats, the task isn't persisting — check Task Scheduler policy. |
 | GPU preset resets after reboot | By design. Both NVML knobs are volatile; re-apply after boot. |
 | CPU toggle reports an error | A policy is blocking `powercfg` writes to the active scheme; relaunch CoreShift elevated. |
+| Volume limit doesn't apply / resets | The `CoreShift Volume Limit` scheduled task may be missing. Re-run `--volume-install` from an elevated prompt, or toggle the limiter off/on in the UI. |
+| Volume limit not restored after logon | Task Scheduler may not run the task at logon. Check Task Scheduler → Task Scheduler Library → CoreShift Volume Limit → History. |
+| Volume changes ignored for some apps | Apps using exclusive-mode audio (WASAPI exclusive, some games) bypass the session volume. Master volume clamp still applies. |
 
 ---
 
@@ -154,6 +206,12 @@ winget install JRSoftware.InnoSetup
   creator do that without prompting again. The UI and the elevated helper coordinate through a
   nonce written to `%LOCALAPPDATA%\CoreShift`, not `HKCU`, because an elevated task process isn't
   guaranteed to see the same user registry hive.
+
+- **Why a scheduled task for the volume limit?** Core Audio APIs don't require elevation — the
+  limiter runs entirely in the user session. The task (`ONCE` at `00:00`, normal privilege) simply
+  guarantees the limit is reapplied at every logon **even if the tray app isn't set to auto-start**,
+  and provides a single entry point (`--volume-apply`) that both the task and the UI can call.
+  Unlike the GPU task, this one never prompts for UAC.
 
 - **PROCTHROTTLEMAX** is a hidden setting by default; `powercfg` can still read and write it
   without un-hiding it. Both AC and DC indices are written, then `SCHEME_CURRENT` is reactivated.
